@@ -120,7 +120,7 @@ def setup_rouge_python(metrics, N, stemming, apply_avg, apply_best, alpha, limit
 
 
 def setup_rouge_perl(rouge_dir, rouge_args, model_dir, system_dir):
-    r = pyrouge.Rouge155(rouge_dir=rouge_dir, rouge_args=rouge_args, log_level=10)
+    r = pyrouge.Rouge155(rouge_dir=rouge_dir, rouge_args=rouge_args)
     r.model_dir = model_dir
     r.system_dir = system_dir
     r.system_filename_pattern = "(\\d+).txt"
@@ -205,7 +205,7 @@ def get_rouge_args(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha
     return rouge_args
 
 
-def run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='/Users/diego/Github/py-rouge/tests/tmp'):
+def run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp'):
     rouge_args = get_rouge_args(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit)
 
     rouge_perl_time = time.time()
@@ -257,7 +257,7 @@ def run_python_rouge_script(hyps, refs, metrics, N, stemming, apply_avg, apply_b
     return rouge_python_time, rouge_python_scores
 
 
-def run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0, tmp_folder='/Users/diego/Github/py-rouge/tests/tmp'):
+def run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0, tmp_folder='tmp'):
     results = {}
     for test_folder in ['summaries_1', 'summaries_2']:
         results[test_folder] = {}
@@ -286,7 +286,7 @@ def run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, a
 
 
 def run_a_single_t_est_on_all_files_rouge_n(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='/Users/diego/Github/py-rouge/tests/tmp_rouge_n')
+    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_n')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -326,7 +326,7 @@ def run_a_single_t_est_on_all_files_rouge_n(metrics, N, alpha, apply_avg, apply_
 
 
 def run_a_single_t_est_on_all_files_rouge_l(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='/Users/diego/Github/py-rouge/tests/tmp_rouge_l')
+    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_l')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -364,7 +364,7 @@ def run_a_single_t_est_on_all_files_rouge_l(metrics, N, alpha, apply_avg, apply_
 
 
 def run_a_single_t_est_on_all_files_rouge_w(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, weight_factor, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor, tmp_folder='/Users/diego/Github/py-rouge/tests/tmp_rouge_w')
+    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor, tmp_folder='tmp_rouge_w')
 
     all_asserts = []
     for test_folder in results.keys():

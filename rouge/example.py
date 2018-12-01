@@ -10,7 +10,7 @@ for aggregator in ['Avg', 'Best', 'Individual']:
     apply_avg = aggregator == 'Avg'
     apply_best = aggregator == 'Best'
 
-    evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l', 'rouge-w'],
+    evaluator = rouge.Rouge(metrics=['rouge-n', 'rouge-l', 'rouge-w', 'rouge-s', 'rouge-su'],
                            max_n=4,
                            limit_length=True,
                            length_limit=100,
@@ -19,7 +19,8 @@ for aggregator in ['Avg', 'Best', 'Individual']:
                            apply_best=apply_best,
                            alpha=0.5, # Default F1_score
                            weight_factor=1.2,
-                           stemming=True)
+                           stemming=False,
+                           stopword_removal=True)
 
 
     hypothesis_1 = "King Norodom Sihanouk has declined requests to chair a summit of Cambodia 's top political leaders , saying the meeting would not bring any progress in deadlocked negotiations to form a government .\nGovernment and opposition parties have asked King Norodom Sihanouk to host a summit meeting after a series of post-election negotiations between the two opposition groups and Hun Sen 's party to form a new government failed .\nHun Sen 's ruling party narrowly won a majority in elections in July , but the opposition _ claiming widespread intimidation and fraud _ has denied Hun Sen the two-thirds vote in parliament required to approve the next government .\n"

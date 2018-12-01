@@ -7,10 +7,10 @@ import pkg_resources
 from io import open
 
 class Rouge:
-    DEFAULT_METRICS = {"rouge-n"}
+    DEFAULT_METRICS = ["rouge-n"]
     DEFAULT_N = 1
     STATS = ["f", "p", "r"]
-    AVAILABLE_METRICS = {"rouge-n", "rouge-l", "rouge-w"}
+    AVAILABLE_METRICS = {"rouge-n", "rouge-l", "rouge-w", "rouge-s", "rouge-su"}
     AVAILABLE_LENGTH_LIMIT_TYPES = {'words', 'bytes'}
     REMOVE_CHAR_PATTERN = re.compile('[^A-Za-z0-9]')
 
@@ -23,8 +23,10 @@ class Rouge:
     WORDNET_DB_FILEPATH_SPECIAL_CASE = 'wordnet_key_value_special_cases.txt'
     WORDNET_DB_DELIMITER = '|'
     STEMMER = None
+    STOPWORDS_SET = set()
+    STOPWORDS_FILEPATH = 'smart_common_words.txt'
 
-    def __init__(self, metrics=None, max_n=None, limit_length=True, length_limit=665, length_limit_type='bytes', apply_avg=True, apply_best=False, stemming=True, alpha=0.5, weight_factor=1.0, ensure_compatibility=True):
+    def __init__(self, metrics=None, max_n=None, max_skip_bigram=4, limit_length=True, length_limit=665, length_limit_type='bytes', apply_avg=True, apply_best=False, stemming=True, stopword_removal=True, alpha=0.5, weight_factor=1.0, ensure_compatibility=True):
         """
         Handle the ROUGE score computation as in the official perl script.
 
@@ -35,12 +37,14 @@ class Rouge:
         Args:
           metrics: What ROUGE score to compute. Available: ROUGE-N, ROUGE-L, ROUGE-W. Default: ROUGE-N
           max_n: N-grams for ROUGE-N if specify. Default:1
+          max_skip_bigram: Maximum allowed gap between swords in a skip bigram for ROUGE-S and ROUGE-SU if specify. Default: 4
           limit_length: If the summaries must be truncated. Defaut:True
           length_limit: Number of the truncation where the unit is express int length_limit_Type. Default:665 (bytes)
           length_limit_type: Unit of length_limit. Available: words, bytes. Default: 'bytes'
           apply_avg: If we should average the score of multiple samples. Default: True. If apply_Avg & apply_best = False, then each ROUGE scores are independant
           apply_best: Take the best instead of the average. Default: False, then each ROUGE scores are independant
           stemming: Apply stemming to summaries. Default: True
+          stopword_removal: Remove stopwords from summaries. Default: True
           alpha: Alpha use to compute f1 score: P*R/((1-a)*P + a*R). Default:0.5
           weight_factor: Weight factor to be used for ROUGE-W. Official rouge score defines it at 1.2. Default: 1.0
           ensure_compatibility: Use same stemmer and special "hacks" to product same results as in the official perl script (besides the number of sampling if not high enough). Default:True
@@ -61,6 +65,19 @@ class Rouge:
             index_rouge_n = self.metrics.index('rouge-n')
             del self.metrics[index_rouge_n]
             self.metrics += ['rouge-{}'.format(n) for n in range(1, self.max_n + 1)]
+
+        self.max_skip_bigram = max_skip_bigram
+        if 'rouge-s' in self.metrics:
+            index_rouge_s = self.metrics.index('rouge-s')
+            del self.metrics[index_rouge_s]
+            self.metrics.append('rouge-s{}'.format(self.max_skip_bigram))
+        elif 'rouge-su' in self.metrics:
+            index_rouge_su = self.metrics.index('rouge-su')
+            del self.metrics[index_rouge_su]
+            self.metrics.append('rouge-su{}'.format(self.max_skip_bigram))
+        else:
+            self.max_skip_bigram = None
+
         self.metrics = set(self.metrics)
 
         self.limit_length = limit_length
@@ -73,6 +90,7 @@ class Rouge:
             self.limit_length = False
         self.length_limit_type = length_limit_type
         self.stemming = stemming
+        self.stopword_removal = stopword_removal
 
         self.apply_avg = apply_avg
         self.apply_best = apply_best
@@ -87,6 +105,8 @@ class Rouge:
             Rouge.load_wordnet_db(ensure_compatibility)
         if Rouge.STEMMER is None:
             Rouge.load_stemmer(ensure_compatibility)
+        if len(Rouge.STOPWORDS_SET) == 0:
+            Rouge.load_stopwords()
 
     @staticmethod
     def load_stemmer(ensure_compatibility):
@@ -121,6 +141,22 @@ class Rouge:
                     k, v = line.strip().split(Rouge.WORDNET_DB_DELIMITER)
                     assert k not in Rouge.WORDNET_KEY_VALUE
                     Rouge.WORDNET_KEY_VALUE[k] = v
+
+    @staticmethod
+    def load_stopwords():
+        """
+        Load stopwords
+        Raises:
+            FileNotFoundError: If stopwords file is not found
+        """
+        filepath = pkg_resources.resource_filename(__name__, Rouge.STOPWORDS_FILEPATH)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError("The file '{}' does not exist".format(filepath))
+
+        with open(filepath, 'r', encoding='utf-8') as fp:
+            for line in fp:
+                k = line.strip()
+                Rouge.STOPWORDS_SET.add(k)
 
     @staticmethod
     def tokenize_text(text, language='english'):
@@ -174,6 +210,23 @@ class Rouge:
                     else:
                         token = Rouge.STEMMER.stem(token)
                     tokens[i] = token
+
+        return tokens
+
+    @staticmethod
+    def remove_stopwords(tokens):
+        """
+        Remove stopwords
+
+        Args:
+          tokens: List of tokens to apply stopword removal
+
+        Returns:
+          List of tokens without stopwords
+        """
+        for i, token in reversed(list(enumerate(tokens))):
+            if token in Rouge.STOPWORDS_SET:
+                del tokens[i]
 
         return tokens
 
@@ -238,7 +291,7 @@ class Rouge:
           sentences: list of string
 
         Returns:
-          A set of n-grams and their freqneucy
+          A set of n-grams and their frequency
         """
         assert len(sentences) > 0
 
@@ -247,6 +300,25 @@ class Rouge:
         for token in tokens:
             unigram_set[token] += 1
         return unigram_set, len(tokens)
+
+    @staticmethod
+    def _get_word_skip_bigrams_and_length(sentences, use_u, max_skip_bigram):
+        """
+        Calculates word skip bigrams
+        :param sentences: List of strings.
+        :param max_skip_bigram: The maximum allowed gap between two words in a skip bigram.
+        :return: A set of skip bigrams and their frequency
+        """
+        assert len(sentences) > 0
+
+        tokens = Rouge._split_into_words(sentences)
+        if use_u:
+            tokens.insert(0, '@start_of_sentence@')
+        skip_bigram_set = collections.defaultdict(int)
+        for i in range(len(tokens) - 1):
+            for j in range(i+1, min(len(tokens), i+max_skip_bigram+2)):
+                skip_bigram_set[(tokens[i], tokens[j])] += 1
+        return skip_bigram_set, ((len(tokens) - (max_skip_bigram + 1))*(max_skip_bigram + 1)) + ((max_skip_bigram + 1) * max_skip_bigram / 2)
 
     @staticmethod
     def _compute_p_r_f_score(evaluated_count, reference_count, overlapping_count, alpha=0.5, weight_factor=1.0):
@@ -447,6 +519,29 @@ class Rouge:
 
         return evaluated_count, reference_count, overlapping_count
 
+    @staticmethod
+    def _compute_skip_bigrams(evaluated_sentences, reference_sentences, use_u, max_skip_bigram):
+        if len(evaluated_sentences) <= 0 or len(reference_sentences) <= 0:
+            raise ValueError("Collections must contain at least 1 sentence.")
+
+        evaluated_skip_bigrams_dict, evaluated_count = Rouge._get_word_skip_bigrams_and_length(
+            sentences=evaluated_sentences,
+            use_u=use_u,
+            max_skip_bigram=max_skip_bigram
+        )
+        reference_skip_bigrams_dict, reference_count = Rouge._get_word_skip_bigrams_and_length(
+            sentences=reference_sentences,
+            use_u=use_u,
+            max_skip_bigram=max_skip_bigram
+        )
+
+        overlapping_skip_bigrams = set(evaluated_skip_bigrams_dict.keys()).intersection(set(reference_skip_bigrams_dict.keys()))
+        overlapping_count = 0
+        for skip_bigram in overlapping_skip_bigrams:
+            overlapping_count += min(evaluated_skip_bigrams_dict[skip_bigram], reference_skip_bigrams_dict[skip_bigram])
+
+        return evaluated_count, reference_count, overlapping_count
+
     def get_scores(self, hypothesis, references):
         """
         Compute precision, recall and f1 score between hypothesis and references
@@ -471,20 +566,41 @@ class Rouge:
         if len(hypothesis) != len(references):
             raise ValueError("'hyps' and 'refs' do not have the same length")
         scores = {}
-        has_rouge_n_metric = len([metric for metric in self.metrics if metric.split('-')[-1].isdigit()]) > 0
+        has_rouge_n_metric = False
+        has_rouge_l_metric = False
+        has_rouge_w_metric = False
+        has_rouge_s_metric = False
+        has_rouge_su_metric = False
+        for metric in self.metrics:
+            metric_type = metric.split('-')[-1]
+            if metric_type.isdigit():
+                has_rouge_n_metric = True
+            elif metric_type == 'l':
+                has_rouge_l_metric = True
+            elif metric_type == 'w':
+                has_rouge_w_metric = True
+            elif 'su' in metric_type:
+                has_rouge_su_metric = True
+            else:
+                has_rouge_s_metric = True
+
         if has_rouge_n_metric:
             scores.update(self._get_scores_rouge_n(hypothesis, references))
             # scores = {**scores, **self._get_scores_rouge_n(hypothesis, references)}
 
-        has_rouge_l_metric = len([metric for metric in self.metrics if metric.split('-')[-1].lower() == 'l']) > 0
         if has_rouge_l_metric:
             scores.update(self._get_scores_rouge_l_or_w(hypothesis, references, False))
             # scores = {**scores, **self._get_scores_rouge_l_or_w(hypothesis, references, False)}
 
-        has_rouge_w_metric = len([metric for metric in self.metrics if metric.split('-')[-1].lower() == 'w']) > 0
         if has_rouge_w_metric:
             scores.update(self._get_scores_rouge_l_or_w(hypothesis, references, True))
             # scores = {**scores, **self._get_scores_rouge_l_or_w(hypothesis, references, True)}
+
+        if has_rouge_s_metric:
+            scores.update(self._get_scores_rouge_s(hypothesis, references, use_u=False))
+
+        if has_rouge_s_metric:
+            scores.update(self._get_scores_rouge_s(hypothesis, references, use_u=True))
 
         return scores
 
@@ -654,9 +770,95 @@ class Rouge:
 
         return scores
 
+    def _get_scores_rouge_s(self, all_hypothesis, all_references, use_u=False):
+        """
+        Computes precision, recall and f1 score between all hypothesis and references
+
+        :param all_hypothesis: A list of strings containing system generated summaries.
+        :param all_references:
+            If multiple references: A list of lists of strings containing human generated summaries.
+            If single reference: A list of strings containing human generated summaries.
+        :param use_u: If true ROUGE-SU is calculated
+        :return:
+        """
+        metric = "rouge-su" if use_u else "rouge-s"
+        if self.apply_avg or self.apply_best:
+            scores = {metric: {stat:0.0 for stat in Rouge.STATS}}
+        else:
+            scores = {metric: [{stat:[] for stat in Rouge.STATS} for _ in range(len(all_hypothesis))]}
+
+        for sample_id, (hypothesis_sentences, references_sentences) in enumerate(zip(all_hypothesis, all_references)):
+            assert isinstance(hypothesis_sentences, str)
+            has_multiple_references = False
+            if isinstance(references_sentences, list):
+                has_multiple_references = len(references_sentences) > 1
+                if not has_multiple_references:
+                    references_sentences = references_sentences[0]
+
+            # Prepare hypothesis and reference(s)
+            hypothesis_sentences = self._preprocess_summary_per_sentence(hypothesis_sentences)
+            references_sentences = [self._preprocess_summary_per_sentence(reference) for reference in references_sentences] if has_multiple_references else [self._preprocess_summary_per_sentence(references_sentences)]
+
+            # Compute scores
+            # Aggregate
+            if self.apply_avg:
+                # average model
+                total_hypothesis_skip_bigrams_count = 0
+                total_reference_skip_bigrams_count = 0
+                total_skip_bigrams_overlapping_count = 0
+
+                for reference_sentences in references_sentences:
+                    hypothesis_count, reference_count, overlapping_skip_bigrams = Rouge._compute_skip_bigrams(
+                        evaluated_sentences=hypothesis_sentences,
+                        reference_sentences=reference_sentences,
+                        use_u=use_u,
+                        max_skip_bigram=self.max_skip_bigram
+                    )
+                    total_hypothesis_skip_bigrams_count += hypothesis_count
+                    total_reference_skip_bigrams_count += reference_count
+                    total_skip_bigrams_overlapping_count += overlapping_skip_bigrams
+
+                score = Rouge._compute_p_r_f_score(total_hypothesis_skip_bigrams_count, total_reference_skip_bigrams_count, total_skip_bigrams_overlapping_count, self.alpha)
+
+                for stat in Rouge.STATS:
+                    scores[metric][stat] += score[stat]
+            elif self.apply_best:
+                best_current_score = None
+                for reference_sentences in references_sentences:
+                    hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
+                        evaluated_sentences=hypothesis_sentences,
+                        reference_sentences=reference_sentences,
+                        use_u=use_u,
+                        max_skip_bigram=self.max_skip_bigram
+                    )
+                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_ngrams, self.alpha)
+                    if best_current_score is None or score['r'] > best_current_score['r']:
+                        best_current_score = score
+
+                for stat in Rouge.STATS:
+                    scores[metric][stat] += best_current_score[stat]
+            else: # Keep all
+                for reference_sentences in references_sentences:
+                    hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
+                        evaluated_sentences=hypothesis_sentences,
+                        reference_sentences=reference_sentences,
+                        use_u=use_u,
+                        max_skip_bigram=self.max_skip_bigram
+                    )
+                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_ngrams, self.alpha)
+                    for stat in Rouge.STATS:
+                        scores[metric][sample_id][stat].append(score[stat])
+
+        # Compute final score with the average or the the max
+        if (self.apply_avg or self.apply_best) and len(all_hypothesis) > 1:
+            for stat in Rouge.STATS:
+                scores[metric][stat] /= len(all_hypothesis)
+
+        return scores
+
     def _preprocess_summary_as_a_whole(self, summary):
         """
-        Preprocessing (truncate text if enable, tokenization, stemming if enable, lowering) of a summary as a whole
+        Preprocessing (truncate text if enable, tokenization, stemming if enable, remove stopwords if enable, lowering) of a summary as a whole
 
         Args:
           summary: string of the summary
@@ -703,6 +905,9 @@ class Rouge:
             tokens = self.tokenize_text(Rouge.KEEP_CANNOT_IN_ONE_WORD.sub('_cannot_', summary))
         else:
             tokens = self.tokenize_text(Rouge.REMOVE_CHAR_PATTERN.sub(' ', summary))
+
+        if self.stopword_removal:
+            self.remove_stopwords(tokens) # stopword removal in place
 
         if self.stemming:
             self.stem_tokens(tokens) # stemming in-place
