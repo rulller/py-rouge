@@ -316,7 +316,7 @@ class Rouge:
             tokens.insert(0, '@start_of_sentence@')
         skip_bigram_set = collections.defaultdict(int)
         for i in range(len(tokens) - 1):
-            for j in range(i+1, min(len(tokens), i+max_skip_bigram+2)):
+            for j in range(i + 1, min(len(tokens), i + max_skip_bigram + 2)):
                 skip_bigram_set[(tokens[i], tokens[j])] += 1
         return skip_bigram_set, ((len(tokens) - (max_skip_bigram + 1))*(max_skip_bigram + 1)) + ((max_skip_bigram + 1) * max_skip_bigram / 2)
 
@@ -599,7 +599,7 @@ class Rouge:
         if has_rouge_s_metric:
             scores.update(self._get_scores_rouge_s(hypothesis, references, use_u=False))
 
-        if has_rouge_s_metric:
+        if has_rouge_su_metric:
             scores.update(self._get_scores_rouge_s(hypothesis, references, use_u=True))
 
         return scores
@@ -781,23 +781,23 @@ class Rouge:
         :param use_u: If true ROUGE-SU is calculated
         :return:
         """
-        metric = "rouge-su" if use_u else "rouge-s"
+        metric = "rouge-su{}".format(self.max_skip_bigram) if use_u else "rouge-s{}".format(self.max_skip_bigram)
         if self.apply_avg or self.apply_best:
             scores = {metric: {stat:0.0 for stat in Rouge.STATS}}
         else:
             scores = {metric: [{stat:[] for stat in Rouge.STATS} for _ in range(len(all_hypothesis))]}
 
-        for sample_id, (hypothesis_sentences, references_sentences) in enumerate(zip(all_hypothesis, all_references)):
-            assert isinstance(hypothesis_sentences, str)
+        for sample_id, (hypothesis, references) in enumerate(zip(all_hypothesis, all_references)):
+            assert isinstance(hypothesis, str)
             has_multiple_references = False
-            if isinstance(references_sentences, list):
-                has_multiple_references = len(references_sentences) > 1
+            if isinstance(references, list):
+                has_multiple_references = len(references) > 1
                 if not has_multiple_references:
-                    references_sentences = references_sentences[0]
+                    references = references[0]
 
             # Prepare hypothesis and reference(s)
-            hypothesis_sentences = self._preprocess_summary_per_sentence(hypothesis_sentences)
-            references_sentences = [self._preprocess_summary_per_sentence(reference) for reference in references_sentences] if has_multiple_references else [self._preprocess_summary_per_sentence(references_sentences)]
+            hypothesis = self._preprocess_summary_as_a_whole(hypothesis)
+            references = [self._preprocess_summary_as_a_whole(reference) for reference in references] if has_multiple_references else [self._preprocess_summary_as_a_whole(references)]
 
             # Compute scores
             # Aggregate
@@ -807,10 +807,10 @@ class Rouge:
                 total_reference_skip_bigrams_count = 0
                 total_skip_bigrams_overlapping_count = 0
 
-                for reference_sentences in references_sentences:
+                for reference in references:
                     hypothesis_count, reference_count, overlapping_skip_bigrams = Rouge._compute_skip_bigrams(
-                        evaluated_sentences=hypothesis_sentences,
-                        reference_sentences=reference_sentences,
+                        evaluated_sentences=hypothesis,
+                        reference_sentences=reference,
                         use_u=use_u,
                         max_skip_bigram=self.max_skip_bigram
                     )
@@ -824,10 +824,10 @@ class Rouge:
                     scores[metric][stat] += score[stat]
             elif self.apply_best:
                 best_current_score = None
-                for reference_sentences in references_sentences:
+                for reference in references:
                     hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
-                        evaluated_sentences=hypothesis_sentences,
-                        reference_sentences=reference_sentences,
+                        evaluated_sentences=hypothesis,
+                        reference_sentences=reference,
                         use_u=use_u,
                         max_skip_bigram=self.max_skip_bigram
                     )
@@ -838,10 +838,10 @@ class Rouge:
                 for stat in Rouge.STATS:
                     scores[metric][stat] += best_current_score[stat]
             else: # Keep all
-                for reference_sentences in references_sentences:
+                for reference in references:
                     hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
-                        evaluated_sentences=hypothesis_sentences,
-                        reference_sentences=reference_sentences,
+                        evaluated_sentences=hypothesis,
+                        reference_sentences=reference,
                         use_u=use_u,
                         max_skip_bigram=self.max_skip_bigram
                     )
