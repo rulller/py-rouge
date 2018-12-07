@@ -13,7 +13,7 @@ def parse_rouge_for_results(output):
     Read the ROUGE scores from the official scripts
     """
     # ROUGE-N
-    pattern = regex.compile('^..ROUGE-(\d|L|(W-\d\.\d*)|(S\*)|(SU\*))\s+Average_(R|P|F):')
+    pattern = regex.compile('^..ROUGE-(\d|L|(W-\d\.\d*)|(S(\*|\d))|(SU(\*|\d)))\s+Average_(R|P|F):')
     parsed_output = [line for line in output.strip().split('\n') if pattern.match(line)]
 
     results = {}
@@ -107,9 +107,9 @@ def parse_rouge_for_ngrams_counts(output):
                         results[-1][key] = val
             else:
                 # ROUGE-SU
-                pattern_ngrams = regex.compile('^total\s+ROUGE-SU-\d\s+')
-                pattern_score = regex.compile('^total\sROUGE-(\d|(SU-\d))-(R|P|F)')
-                pattern_metric = regex.compile('ROUGE-SU-\d')
+                pattern_ngrams = regex.compile('^total\s+ROUGE-SU\d\s+')
+                pattern_score = regex.compile('^total\sROUGE-(\d|(SU\d))-(R|P|F)')
+                pattern_metric = regex.compile('ROUGE-SU\d')
                 parsed_output = [regex.sub(pattern_metric, 'ROUGE-SU', line) for line in output.strip().split('\n') if
                                  pattern_ngrams.match(line) or pattern_score.match(line)]
 
@@ -132,9 +132,9 @@ def parse_rouge_for_ngrams_counts(output):
                             results[-1][key] = val
                 else:
                     # ROUGE-S
-                    pattern_ngrams = regex.compile('^total\s+ROUGE-S-\d\s+')
-                    pattern_score = regex.compile('^total\sROUGE-(\d|(S-\d))-(R|P|F)')
-                    pattern_metric = regex.compile('ROUGE-S-\d')
+                    pattern_ngrams = regex.compile('^total\s+ROUGE-S\d\s+')
+                    pattern_score = regex.compile('^total\sROUGE-(\d|(S\d))-(R|P|F)')
+                    pattern_metric = regex.compile('ROUGE-S\d')
                     parsed_output = [regex.sub(pattern_metric, 'ROUGE-S', line) for line in output.strip().split('\n') if
                                      pattern_ngrams.match(line) or pattern_score.match(line)]
 
@@ -159,9 +159,10 @@ def parse_rouge_for_ngrams_counts(output):
     return results
 
 
-def setup_rouge_python(metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_type, length_limit, weight_factor):
+def setup_rouge_python(metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_type, length_limit, weight_factor):
     return rouge.Rouge(metrics=metrics,
                        max_n=N,
+                       max_skip_bigram=max_skip_bigram,
                        limit_length=limit_length,
                        length_limit=length_limit,
                        length_limit_type=length_type,
@@ -239,7 +240,7 @@ def get_hypothesis_references(test_case, all_hyps, all_refs):
     return hyps, refs
 
 
-def get_rouge_args(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, length_limit_type, length_type, length_limit, weight_factor=1.2):
+def get_rouge_args(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, length_limit_type, length_type, length_limit, weight_factor=1.2):
     rouge_args = ' -e {}'.format(rouge_dir + '/data')
     if "rouge-n" in metrics:
         rouge_args +=' -n {}'.format(N)
@@ -248,9 +249,9 @@ def get_rouge_args(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg,
     if "rouge-w" in metrics:
         rouge_args += ' -w {}'.format(weight_factor)
     if "rouge-s" in metrics:
-        rouge_args += ' -2 -4'
+        rouge_args += ' -2 {}'.format(max_skip_bigram)
     if "rouge-su" in metrics:
-        rouge_args += ' -2 -4 -u'
+        rouge_args += ' -2 {} -u'.format(max_skip_bigram)
     if stemming:
         rouge_args += ' -m'
     if stopword_removal:
@@ -265,8 +266,8 @@ def get_rouge_args(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg,
     return rouge_args
 
 
-def run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp'):
-    rouge_args = get_rouge_args(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit)
+def run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp'):
+    rouge_args = get_rouge_args(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit)
 
     rouge_perl_time = time.time()
 
@@ -308,16 +309,16 @@ def run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, stemming, stopword_
     return rouge_perl_time, rouge_perl_scores, rouge_perl_ngrams_count
 
 
-def run_python_rouge_script(hyps, refs, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0):
+def run_python_rouge_script(hyps, refs, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0):
     rouge_python_time = time.time()
-    rouge_python = setup_rouge_python(metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor)
+    rouge_python = setup_rouge_python(metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor)
     rouge_python_scores = rouge_python.get_scores(hyps, refs)
     rouge_python_time = time.time() - rouge_python_time
 
     return rouge_python_time, rouge_python_scores
 
 
-def run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0, tmp_folder='tmp'):
+def run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor=1.0, tmp_folder='tmp'):
     results = {}
     for test_folder in ['summaries_1', 'summaries_2']:
         results[test_folder] = {}
@@ -332,8 +333,8 @@ def run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_
         for test_case in test_cases:
             hyps, refs = get_hypothesis_references(test_case, all_hyps, all_refs)
 
-            rouge_python_time, rouge_python_scores = run_python_rouge_script(hyps, refs, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor)
-            rouge_perl_time, rouge_perl_scores, rouge_perl_ngrams_count = run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder)
+            rouge_python_time, rouge_python_scores = run_python_rouge_script(hyps, refs, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor)
+            rouge_perl_time, rouge_perl_scores, rouge_perl_ngrams_count = run_perl_rouge_script(hyps, refs, rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder)
 
             results[test_folder][test_case] = {'python':{'time':rouge_python_time,
                                                          'scores':rouge_python_scores},
@@ -344,8 +345,8 @@ def run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_
     return results
 
 
-def run_a_single_t_est_on_all_files_rouge_n(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_n')
+def run_a_single_t_est_on_all_files_rouge_n(metrics, N, max_skip_bigram, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
+    results = run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_n')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -384,8 +385,8 @@ def run_a_single_t_est_on_all_files_rouge_n(metrics, N, alpha, apply_avg, apply_
     return all_asserts
 
 
-def run_a_single_t_est_on_all_files_rouge_l(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_l')
+def run_a_single_t_est_on_all_files_rouge_l(metrics, N, max_skip_bigram, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
+    results = run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_l')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -422,8 +423,8 @@ def run_a_single_t_est_on_all_files_rouge_l(metrics, N, alpha, apply_avg, apply_
     return all_asserts
 
 
-def run_a_single_t_est_on_all_files_rouge_w(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, weight_factor, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor, tmp_folder='tmp_rouge_w')
+def run_a_single_t_est_on_all_files_rouge_w(metrics, N, max_skip_bigram, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, weight_factor, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
+    results = run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, weight_factor, tmp_folder='tmp_rouge_w')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -460,8 +461,8 @@ def run_a_single_t_est_on_all_files_rouge_w(metrics, N, alpha, apply_avg, apply_
     return all_asserts
 
 
-def run_a_single_t_est_on_all_files_rouge_s(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_s')
+def run_a_single_t_est_on_all_files_rouge_s(metrics, N, max_skip_bigram, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
+    results = run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_s')
 
     all_asserts = []
     for test_folder in results.keys():
@@ -498,8 +499,8 @@ def run_a_single_t_est_on_all_files_rouge_s(metrics, N, alpha, apply_avg, apply_
     return all_asserts
 
 
-def run_a_single_t_est_on_all_files_rouge_su(metrics, N, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
-    results = run_a_single_t_est(rouge_dir, metrics, N, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_su')
+def run_a_single_t_est_on_all_files_rouge_su(metrics, N, max_skip_bigram, alpha, apply_avg, apply_best, length_limit, length_limit_type, limit_length, rouge_dir, stemming, stopword_removal, epsilon_ngrams_count_and_hits, epsilon_avg_with_resampling):
+    results = run_a_single_t_est(rouge_dir, metrics, N, max_skip_bigram, stemming, stopword_removal, apply_avg, apply_best, alpha, limit_length, length_limit_type, length_limit, tmp_folder='tmp_rouge_su')
 
     all_asserts = []
     for test_folder in results.keys():

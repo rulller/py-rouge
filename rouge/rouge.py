@@ -33,6 +33,9 @@ class Rouge:
         Note 1: Small differences might happen if the resampling of the perl script is not high enough (as the average depends on this).
         Note 2: Stemming of the official Porter Stemmer of the ROUGE perl script is slightly different and the Porter one implemented in NLTK. However, special cases of DUC 2004 have been traited.
                 The solution would be to rewrite the whole perl stemming in python from the original script
+        Note 3: @rulller: The original script does not add the last token in the unigrams but there is no obvious reason for that and it is
+                probably a bug. Therefore, I decided to add the last token in the unigrams and consequently one should expect
+                small differences in ROUGE-SU scores from the original perl script.
 
         Args:
           metrics: What ROUGE score to compute. Available: ROUGE-N, ROUGE-L, ROUGE-W. Default: ROUGE-N
@@ -312,13 +315,21 @@ class Rouge:
         assert len(sentences) > 0
 
         tokens = Rouge._split_into_words(sentences)
-        if use_u:
-            tokens.insert(0, '@start_of_sentence@')
         skip_bigram_set = collections.defaultdict(int)
+        counts = 0
         for i in range(len(tokens) - 1):
+            if use_u:
+                skip_bigram_set[tokens[i]] += 1
+                counts += 1
             for j in range(i + 1, min(len(tokens), i + max_skip_bigram + 2)):
                 skip_bigram_set[(tokens[i], tokens[j])] += 1
-        return skip_bigram_set, ((len(tokens) - (max_skip_bigram + 1))*(max_skip_bigram + 1)) + ((max_skip_bigram + 1) * max_skip_bigram / 2)
+                counts += 1
+        # Also add the last token when computing ROUGE-SU.
+        # The original perl script does not count it.
+        if use_u:
+            skip_bigram_set[tokens[-1]] += 1
+            counts += 1
+        return skip_bigram_set, counts
 
     @staticmethod
     def _compute_p_r_f_score(evaluated_count, reference_count, overlapping_count, alpha=0.5, weight_factor=1.0):
@@ -584,6 +595,7 @@ class Rouge:
             else:
                 has_rouge_s_metric = True
 
+
         if has_rouge_n_metric:
             scores.update(self._get_scores_rouge_n(hypothesis, references))
             # scores = {**scores, **self._get_scores_rouge_n(hypothesis, references)}
@@ -805,7 +817,7 @@ class Rouge:
                 # average model
                 total_hypothesis_skip_bigrams_count = 0
                 total_reference_skip_bigrams_count = 0
-                total_skip_bigrams_overlapping_count = 0
+                total_overlapping_skip_bigrams_count = 0
 
                 for reference in references:
                     hypothesis_count, reference_count, overlapping_skip_bigrams = Rouge._compute_skip_bigrams(
@@ -816,22 +828,22 @@ class Rouge:
                     )
                     total_hypothesis_skip_bigrams_count += hypothesis_count
                     total_reference_skip_bigrams_count += reference_count
-                    total_skip_bigrams_overlapping_count += overlapping_skip_bigrams
+                    total_overlapping_skip_bigrams_count += overlapping_skip_bigrams
 
-                score = Rouge._compute_p_r_f_score(total_hypothesis_skip_bigrams_count, total_reference_skip_bigrams_count, total_skip_bigrams_overlapping_count, self.alpha)
+                score = Rouge._compute_p_r_f_score(total_hypothesis_skip_bigrams_count, total_reference_skip_bigrams_count, total_overlapping_skip_bigrams_count, self.alpha)
 
                 for stat in Rouge.STATS:
                     scores[metric][stat] += score[stat]
             elif self.apply_best:
                 best_current_score = None
                 for reference in references:
-                    hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
+                    hypothesis_count, reference_count, overlapping_skip_bigrams = Rouge._compute_skip_bigrams(
                         evaluated_sentences=hypothesis,
                         reference_sentences=reference,
                         use_u=use_u,
                         max_skip_bigram=self.max_skip_bigram
                     )
-                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_ngrams, self.alpha)
+                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_skip_bigrams, self.alpha)
                     if best_current_score is None or score['r'] > best_current_score['r']:
                         best_current_score = score
 
@@ -839,13 +851,13 @@ class Rouge:
                     scores[metric][stat] += best_current_score[stat]
             else: # Keep all
                 for reference in references:
-                    hypothesis_count, reference_count, overlapping_ngrams = Rouge._compute_skip_bigrams(
+                    hypothesis_count, reference_count, overlapping_skip_bigrams = Rouge._compute_skip_bigrams(
                         evaluated_sentences=hypothesis,
                         reference_sentences=reference,
                         use_u=use_u,
                         max_skip_bigram=self.max_skip_bigram
                     )
-                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_ngrams, self.alpha)
+                    score = Rouge._compute_p_r_f_score(hypothesis_count, reference_count, overlapping_skip_bigrams, self.alpha)
                     for stat in Rouge.STATS:
                         scores[metric][sample_id][stat].append(score[stat])
 
