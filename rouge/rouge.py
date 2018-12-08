@@ -326,7 +326,7 @@ class Rouge:
                 counts += 1
         # Also add the last token when computing ROUGE-SU.
         # The original perl script does not count it.
-        if use_u:
+        if use_u and len(tokens) > 0:
             skip_bigram_set[tokens[-1]] += 1
             counts += 1
         return skip_bigram_set, counts
