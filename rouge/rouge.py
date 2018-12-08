@@ -595,7 +595,6 @@ class Rouge:
             else:
                 has_rouge_s_metric = True
 
-
         if has_rouge_n_metric:
             scores.update(self._get_scores_rouge_n(hypothesis, references))
             # scores = {**scores, **self._get_scores_rouge_n(hypothesis, references)}
