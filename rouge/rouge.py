@@ -1,10 +1,14 @@
 import nltk
+import numpy as np
 import os
 import re
 import itertools
 import collections
 import pkg_resources
+
+from gensim.models import KeyedVectors
 from io import open
+
 
 class Rouge:
     DEFAULT_METRICS = ["rouge-n"]
@@ -25,8 +29,10 @@ class Rouge:
     STEMMER = None
     STOPWORDS_SET = set()
     STOPWORDS_FILEPATH = 'smart_common_words.txt'
+    USE_EMBEDDINGS = False
+    EMBEDDINGS = None
 
-    def __init__(self, metrics=None, max_n=None, max_skip_bigram=4, limit_length=True, length_limit=665, length_limit_type='bytes', apply_avg=True, apply_best=False, stemming=True, stopword_removal=True, alpha=0.5, weight_factor=1.0, ensure_compatibility=True):
+    def __init__(self, metrics=None, max_n=1, max_skip_bigram=4, limit_length=True, length_limit=665, length_limit_type='bytes', apply_avg=True, apply_best=False, stemming=True, stopword_removal=True, alpha=0.5, weight_factor=1.0, ensure_compatibility=True, embeddings_file=None):
         """
         Handle the ROUGE score computation as in the official perl script.
 
@@ -36,6 +42,10 @@ class Rouge:
         Note 3: @rulller: The original script does not add the last token in the unigrams but there is no obvious reason for that and it is
                 probably a bug. Therefore, I decided to add the last token in the unigrams and consequently one should expect
                 small differences in ROUGE-SU scores from the original perl script.
+        Note 4: @rulller: I have implemented versions of ROUGE-N, ROUGE-S, and ROUGE-SU that take into account word embeddings first introduced
+                in [1]
+
+        [1] http://www.aclweb.org/anthology/D15-1222
 
         Args:
           metrics: What ROUGE score to compute. Available: ROUGE-N, ROUGE-L, ROUGE-W. Default: ROUGE-N
@@ -51,6 +61,7 @@ class Rouge:
           alpha: Alpha use to compute f1 score: P*R/((1-a)*P + a*R). Default:0.5
           weight_factor: Weight factor to be used for ROUGE-W. Official rouge score defines it at 1.2. Default: 1.0
           ensure_compatibility: Use same stemmer and special "hacks" to product same results as in the official perl script (besides the number of sampling if not high enough). Default:True
+          embeddings_file: Path to embeddings file to be load by gensim.models.KeyedVectors in binary word2vec format.
 
         Raises:
           ValueError: raises exception if metric is not among AVAILABLE_METRICS
@@ -111,6 +122,13 @@ class Rouge:
         if len(Rouge.STOPWORDS_SET) == 0:
             Rouge.load_stopwords()
 
+        if embeddings_file is not None:
+            Rouge.load_embeddings(embeddings_file)
+            self.stemming = False
+        else:
+            Rouge.EMBEDDINGS = None
+            Rouge.USE_EMBEDDINGS = False
+
     @staticmethod
     def load_stemmer(ensure_compatibility):
         """
@@ -160,6 +178,11 @@ class Rouge:
             for line in fp:
                 k = line.strip()
                 Rouge.STOPWORDS_SET.add(k)
+
+    @staticmethod
+    def load_embeddings(embeddings_file):
+        Rouge.USE_EMBEDDINGS = True
+        Rouge.EMBEDDINGS = KeyedVectors.load_word2vec_format(embeddings_file, binary=True)
 
     @staticmethod
     def tokenize_text(text, language='english'):
@@ -319,7 +342,7 @@ class Rouge:
         counts = 0
         for i in range(len(tokens) - 1):
             if use_u:
-                skip_bigram_set[tokens[i]] += 1
+                skip_bigram_set[tuple([tokens[i]])] += 1
                 counts += 1
             for j in range(i + 1, min(len(tokens), i + max_skip_bigram + 2)):
                 skip_bigram_set[(tokens[i], tokens[j])] += 1
@@ -327,7 +350,7 @@ class Rouge:
         # Also add the last token when computing ROUGE-SU.
         # The original perl script does not count it.
         if use_u and len(tokens) > 0:
-            skip_bigram_set[tokens[-1]] += 1
+            skip_bigram_set[tuple([tokens[-1]])] += 1
             counts += 1
         return skip_bigram_set, counts
 
@@ -397,11 +420,17 @@ class Rouge:
         evaluated_ngrams, _, evaluated_count = Rouge._get_word_ngrams_and_length(n, evaluated_sentences)
         reference_ngrams, _, reference_count = Rouge._get_word_ngrams_and_length(n, reference_sentences)
 
-        # Gets the overlapping ngrams between evaluated and reference
-        overlapping_ngrams = set(evaluated_ngrams.keys()).intersection(set(reference_ngrams.keys()))
-        overlapping_count = 0
-        for ngram in overlapping_ngrams:
-            overlapping_count += min(evaluated_ngrams[ngram], reference_ngrams[ngram])
+        if Rouge.USE_EMBEDDINGS:
+            overlapping_count = Rouge._ngram_similarity(
+                evaluated_ngrams_dict=evaluated_ngrams,
+                references_ngrams_dict=reference_ngrams
+            )
+        else:
+            # Gets the overlapping ngrams between evaluated and reference
+            overlapping_ngrams = set(evaluated_ngrams.keys()).intersection(set(reference_ngrams.keys()))
+            overlapping_count = 0
+            for ngram in overlapping_ngrams:
+                overlapping_count += min(evaluated_ngrams[ngram], reference_ngrams[ngram])
 
         return evaluated_count, reference_count, overlapping_count
 
@@ -546,12 +575,67 @@ class Rouge:
             max_skip_bigram=max_skip_bigram
         )
 
-        overlapping_skip_bigrams = set(evaluated_skip_bigrams_dict.keys()).intersection(set(reference_skip_bigrams_dict.keys()))
-        overlapping_count = 0
-        for skip_bigram in overlapping_skip_bigrams:
-            overlapping_count += min(evaluated_skip_bigrams_dict[skip_bigram], reference_skip_bigrams_dict[skip_bigram])
+        if Rouge.USE_EMBEDDINGS:
+            overlapping_count = Rouge._ngram_similarity(
+                evaluated_ngrams_dict=evaluated_skip_bigrams_dict,
+                references_ngrams_dict=reference_skip_bigrams_dict
+            )
+        else:
+            overlapping_skip_bigrams = set(evaluated_skip_bigrams_dict.keys()).intersection(set(reference_skip_bigrams_dict.keys()))
+            overlapping_count = 0
+            for skip_bigram in overlapping_skip_bigrams:
+                overlapping_count += min(evaluated_skip_bigrams_dict[skip_bigram], reference_skip_bigrams_dict[skip_bigram])
 
         return evaluated_count, reference_count, overlapping_count
+
+    @staticmethod
+    def _ngram_similarity(evaluated_ngrams_dict, references_ngrams_dict):
+
+        evaluated_ngrams_vectors, evaluated_ngrams_counts = Rouge._get_ngram_vectors_and_counts(ngrams_dict=evaluated_ngrams_dict)
+        references_ngrams_vectors, references_ngrams_counts = Rouge._get_ngram_vectors_and_counts(ngrams_dict=references_ngrams_dict)
+
+        total_ngram_similarity = 0
+        if len(evaluated_ngrams_counts) > 0 and len(references_ngrams_counts) > 0:
+            similarity_matrix = np.zeros((len(references_ngrams_counts), len(evaluated_ngrams_counts)))
+            for i in range(similarity_matrix.shape[0]):
+                similarity_matrix[i] = (Rouge.EMBEDDINGS.cosine_similarities(references_ngrams_vectors[i], evaluated_ngrams_vectors) + 1) / 2.
+
+            while 0 not in similarity_matrix.shape:
+                max_similarity_index = np.unravel_index(np.argmax(similarity_matrix), similarity_matrix.shape)
+                minimum_count = min(
+                    references_ngrams_counts[max_similarity_index[0]],
+                    evaluated_ngrams_counts[max_similarity_index[1]]
+                )
+                total_ngram_similarity += similarity_matrix[max_similarity_index] * minimum_count
+                references_ngrams_counts[max_similarity_index[0]] -= minimum_count
+                evaluated_ngrams_counts[max_similarity_index[1]] -= minimum_count
+
+                if references_ngrams_counts[max_similarity_index[0]] == 0:
+                    references_ngrams_counts = np.delete(arr=references_ngrams_counts, obj=max_similarity_index[0])
+                    similarity_matrix = np.delete(arr=similarity_matrix, obj=max_similarity_index, axis=0)
+
+                if evaluated_ngrams_counts[max_similarity_index[1]] == 0:
+                    evaluated_ngrams_counts = np.delete(arr=evaluated_ngrams_counts, obj=max_similarity_index[1])
+                    similarity_matrix = np.delete(arr=similarity_matrix, obj=max_similarity_index, axis=1)
+
+        return total_ngram_similarity
+
+    @staticmethod
+    def _get_ngram_vectors_and_counts(ngrams_dict):
+        ngrams_vectors = []
+        ngrams_counts = []
+        for ngram in ngrams_dict:
+            all_vectors_found = True
+            ngram_vector = np.ones(Rouge.EMBEDDINGS.vector_size, dtype=np.float32)
+            for word in ngram:
+                if word in Rouge.EMBEDDINGS.vocab:
+                    ngram_vector *= Rouge.EMBEDDINGS.vectors[Rouge.EMBEDDINGS.vocab[word].index]
+                else:
+                    all_vectors_found = False
+            if all_vectors_found:
+                ngrams_vectors.append(ngram_vector)
+                ngrams_counts.append(ngrams_dict[ngram])
+        return np.array(ngrams_vectors), np.array(ngrams_counts)
 
     def get_scores(self, hypothesis, references):
         """
