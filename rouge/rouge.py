@@ -6,8 +6,8 @@ import itertools
 import collections
 import pkg_resources
 
-from gensim.models import KeyedVectors
 from io import open
+from pymagnitude import Magnitude
 
 
 class Rouge:
@@ -40,10 +40,11 @@ class Rouge:
         Note 3: @rulller: The original script does not add the last token in the unigrams but there is no obvious reason for that and it is
                 probably a bug. Therefore, I decided to add the last token in the unigrams and consequently one should expect
                 small differences in ROUGE-SU scores from the original perl script.
-        Note 4: @rulller: I have implemented versions of ROUGE-N, ROUGE-S, and ROUGE-SU that take into account word embeddings first introduced
-                in [1]
+        Note 4: @rulller: I have implemented versions of ROUGE-N, ROUGE-S, and ROUGE-SU that take into account word embeddings inspired by the work
+                in [1]. The implementations however are quite different and I use pymagnitude [2] to take the embeddings.
 
         [1] http://www.aclweb.org/anthology/D15-1222
+        [2] https://github.com/plasticityai/magnitude
 
         Args:
           metrics: What ROUGE score to compute. Available: ROUGE-N, ROUGE-L, ROUGE-W. Default: ROUGE-N
@@ -123,7 +124,8 @@ class Rouge:
 
         if embeddings_file is not None:
             self.use_embeddings = True
-            self.embeddings = KeyedVectors.load_word2vec_format(embeddings_file, binary=True)
+            # self.embeddings = KeyedVectors.load_word2vec_format(embeddings_file, binary=True)
+            self.embeddings = Magnitude(embeddings_file, ngram_oov=True)
             self.stemming = False
 
     @staticmethod
@@ -585,9 +587,11 @@ class Rouge:
 
         total_ngram_similarity = 0
         if len(evaluated_ngrams_counts) > 0 and len(references_ngrams_counts) > 0:
-            similarity_matrix = np.zeros((len(references_ngrams_counts), len(evaluated_ngrams_counts)))
-            for i in range(similarity_matrix.shape[0]):
-                similarity_matrix[i] = (self.embeddings.cosine_similarities(references_ngrams_vectors[i], evaluated_ngrams_vectors) + 1) / 2.
+            # similarity_matrix = np.zeros((len(references_ngrams_counts), len(evaluated_ngrams_counts)))
+            # for i in range(similarity_matrix.shape[0]):
+            #     similarity_matrix[i] = (self.embeddings.cosine_similarities(references_ngrams_vectors[i], evaluated_ngrams_vectors) + 1) / 2.
+
+            similarity_matrix = (self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors) + 1) / 2
 
             while 0 not in similarity_matrix.shape:
                 max_similarity_index = np.unravel_index(np.argmax(similarity_matrix), similarity_matrix.shape)
@@ -613,16 +617,9 @@ class Rouge:
         ngrams_vectors = []
         ngrams_counts = []
         for ngram in ngrams_dict:
-            all_vectors_found = True
-            ngram_vector = np.ones(self.embeddings.vector_size, dtype=np.float32)
-            for word in ngram:
-                if word in self.embeddings.vocab:
-                    ngram_vector *= self.embeddings.vectors[self.embeddings.vocab[word].index]
-                else:
-                    all_vectors_found = False
-            if all_vectors_found:
-                ngrams_vectors.append(ngram_vector)
-                ngrams_counts.append(ngrams_dict[ngram])
+            ngram_vector = np.prod(self.embeddings.query(list(ngram)), axis=0)
+            ngrams_vectors.append(ngram_vector)
+            ngrams_counts.append(ngrams_dict[ngram])
         return np.array(ngrams_vectors), np.array(ngrams_counts)
 
     def get_scores(self, hypothesis, references):
