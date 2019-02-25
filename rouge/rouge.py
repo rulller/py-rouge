@@ -587,11 +587,8 @@ class Rouge:
 
         total_ngram_similarity = 0
         if len(evaluated_ngrams_counts) > 0 and len(references_ngrams_counts) > 0:
-            # similarity_matrix = np.zeros((len(references_ngrams_counts), len(evaluated_ngrams_counts)))
-            # for i in range(similarity_matrix.shape[0]):
-            #     similarity_matrix[i] = (self.embeddings.cosine_similarities(references_ngrams_vectors[i], evaluated_ngrams_vectors) + 1) / 2.
-
-            similarity_matrix = (self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors) + 1) / 2
+            # similarity_matrix = (self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors) + 1) / 2
+            similarity_matrix = np.maximum(0, self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors))
 
             while 0 not in similarity_matrix.shape:
                 max_similarity_index = np.unravel_index(np.argmax(similarity_matrix), similarity_matrix.shape)
