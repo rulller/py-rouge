@@ -41,7 +41,8 @@ class Rouge:
                 probably a bug. Therefore, I decided to add the last token in the unigrams and consequently one should expect
                 small differences in ROUGE-SU scores from the original perl script.
         Note 4: @rulller: I have implemented versions of ROUGE-N, ROUGE-S, and ROUGE-SU that take into account word embeddings inspired by the work
-                in [1]. The implementations however are quite different and I use pymagnitude [2] to take the embeddings.
+                in [1]. The implementations however are quite different and I use pymagnitude [2] to take the embeddings. Glove, Word2Vec and other
+                embeddings are supported. See [2] for the available models.
 
         [1] http://www.aclweb.org/anthology/D15-1222
         [2] https://github.com/plasticityai/magnitude
@@ -60,7 +61,7 @@ class Rouge:
           alpha: Alpha use to compute f1 score: P*R/((1-a)*P + a*R). Default:0.5
           weight_factor: Weight factor to be used for ROUGE-W. Official rouge score defines it at 1.2. Default: 1.0
           ensure_compatibility: Use same stemmer and special "hacks" to product same results as in the official perl script (besides the number of sampling if not high enough). Default:True
-          embeddings_file: Path to embeddings file to be load by gensim.models.KeyedVectors in binary word2vec format.
+          embeddings_file: Path to embeddings file to be loaded by Magnitude.
 
         Raises:
           ValueError: raises exception if metric is not among AVAILABLE_METRICS
