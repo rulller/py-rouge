@@ -125,7 +125,7 @@ class Rouge:
         if embeddings_file is not None:
             self.use_embeddings = True
             # self.embeddings = KeyedVectors.load_word2vec_format(embeddings_file, binary=True)
-            self.embeddings = Magnitude(embeddings_file, ngram_oov=True)
+            self.embeddings = Magnitude(embeddings_file)
             self.stemming = False
 
     @staticmethod
