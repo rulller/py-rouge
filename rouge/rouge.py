@@ -30,7 +30,24 @@ class Rouge:
     STOPWORDS_SET = set()
     STOPWORDS_FILEPATH = 'smart_common_words.txt'
 
-    def __init__(self, metrics=None, max_n=1, max_skip_bigram=4, limit_length=True, length_limit=665, length_limit_type='bytes', apply_avg=True, apply_best=False, stemming=True, stopword_removal=True, alpha=0.5, weight_factor=1.0, ensure_compatibility=True, embeddings_file=None):
+    def __init__(
+            self,
+            metrics=None,
+            max_n=1,
+            max_skip_bigram=4,
+            limit_length=True,
+            length_limit=665,
+            length_limit_type='bytes',
+            apply_avg=True,
+            apply_best=False,
+            stemming=True,
+            stopword_removal=True,
+            alpha=0.5,
+            weight_factor=1.0,
+            ensure_compatibility=True,
+            embeddings_file=None,
+            embeddings_similarity_mode=0
+    ):
         """
         Handle the ROUGE score computation as in the official perl script.
 
@@ -62,6 +79,7 @@ class Rouge:
           weight_factor: Weight factor to be used for ROUGE-W. Official rouge score defines it at 1.2. Default: 1.0
           ensure_compatibility: Use same stemmer and special "hacks" to product same results as in the official perl script (besides the number of sampling if not high enough). Default:True
           embeddings_file: Path to embeddings file to be loaded by Magnitude.
+          embeddings_similarity_mode: 0: (cosine + 1) / 2, 1: ReLU(cosine)
 
         Raises:
           ValueError: raises exception if metric is not among AVAILABLE_METRICS
@@ -106,6 +124,7 @@ class Rouge:
         self.stemming = stemming
         self.stopword_removal = stopword_removal
         self.use_embeddings = False
+        self.embeddings_similarity_mode = embeddings_similarity_mode
 
         self.apply_avg = apply_avg
         self.apply_best = apply_best
@@ -588,8 +607,10 @@ class Rouge:
 
         total_ngram_similarity = 0
         if len(evaluated_ngrams_counts) > 0 and len(references_ngrams_counts) > 0:
-            # similarity_matrix = (self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors) + 1) / 2
-            similarity_matrix = np.maximum(0, self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors))
+            if self.embeddings_similarity_mode == 0:
+                similarity_matrix = (self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors) + 1) / 2
+            else:
+                similarity_matrix = np.maximum(0, self.embeddings.similarity(references_ngrams_vectors, evaluated_ngrams_vectors))
 
             while 0 not in similarity_matrix.shape:
                 max_similarity_index = np.unravel_index(np.argmax(similarity_matrix), similarity_matrix.shape)
